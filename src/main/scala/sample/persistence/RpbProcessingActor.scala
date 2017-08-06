@@ -12,11 +12,10 @@ import scala.concurrent.duration._
 import scala.util.{Failure, Random, Success}
 
 class RpbProcessingActor extends PersistentActor with AtLeastOnceDelivery {
-  private final val limitedExecutor = {
+  private implicit final val limitedContext = {
     val maxConcurrency = 5
-    Executors.newWorkStealingPool(maxConcurrency)
+    ExecutionContext.fromExecutor(Executors.newWorkStealingPool(maxConcurrency))
   }
-  private final val limitedContext = ExecutionContext.fromExecutor(limitedExecutor)
 
   override def persistenceId = "sample-id-1"
 
@@ -63,7 +62,7 @@ class RpbProcessingActor extends PersistentActor with AtLeastOnceDelivery {
           self ! Confirm(id)
         case Failure(_) =>
           // do not confirm failures
-      }(ExecutionContext.Implicits.global)
+      }
 
     case confirm: Confirm =>
       println(s"${Instant.now()} --- CONFIRM ${confirm.id}")
@@ -77,24 +76,22 @@ class RpbProcessingActor extends PersistentActor with AtLeastOnceDelivery {
   }
 
 
-  private def process(msg: Message): Future[Unit] = msg.label match {
-    case "boom" if RpbState.global.boom =>
-      sys.runtime.halt(42)
-      ???
-    case "hang" if RpbState.global.hang =>
-      Future.never
-    case other =>
-      val millis = try {
-        Integer.parseUnsignedInt(other)
-      } catch {
-        case _: NumberFormatException =>
-          Random.nextInt(50)
-      }
-
-      Future {
-        println(s"${Instant.now()} --- SLEEPING $millis")
-        Thread.sleep(millis)
-        println(s"${Instant.now()} --- SLEPT $millis")
-      }(limitedContext)
+  private def process(msg: Message): Future[Unit] = {
+    if (RpbState.recovery) Future.successful(())
+    else msg.label match {
+      case "boom" =>
+        sys.runtime.halt(42)
+        Future.never
+      case "hang" =>
+        Future.never
+      case other =>
+        val duration = try {
+          Duration.create(other)
+        } catch {
+          case _: NumberFormatException =>
+            Random.nextInt(50).milliseconds
+        }
+        Future(Thread.sleep(duration.toMillis))
+    }
   }
 }
