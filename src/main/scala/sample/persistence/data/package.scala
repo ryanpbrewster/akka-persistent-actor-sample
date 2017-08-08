@@ -5,6 +5,8 @@ import java.time.Instant
 import akka.actor.ActorRef
 
 package object data {
+  case object MessagePersisted
+
   sealed abstract class Internal
   case class Message(label: String) extends Internal
   case class Confirm(id: Long) extends Internal
